@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project
+	xmlns="http://maven.apache.org/POM/4.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+>
+	<modelVersion>4.0.0</modelVersion>
+
+	<groupId>com.video_4.0.1</groupId>
+	<artifactId>video_4.0.1-app</artifactId>
+	<version>1.0.0</version>
+
+	<name>Videotron V4.0.1</name>
+
+	<packaging>pom</packaging>
+
+	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<maven.compiler.source>1.8</maven.compiler.source>
+		<maven.compiler.target>1.8</maven.compiler.target>
+
+		<reforms.version>4.0.2</reforms.version>
+		<app.version>${project.version}</app.version>
+	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<!-- This is where we set desired Re_Forms 21 version -->
+			<dependency>
+				<groupId>com.reforms21</groupId>
+				<artifactId>reforms-bom</artifactId>
+				<version>${reforms.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+
+			<!-- Here we list all project modules that are to be deployed -->
+			<dependency>
+				<groupId>${project.groupId}</groupId>
+				<artifactId>video_4.0.1-app-forms</artifactId>
+				<version>1.0.0</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
+	<dependencies>
+		<!-- Mandatory Re_Forms 21 dependencies -->
+		<dependency>
+			<groupId>com.reforms21</groupId>
+			<artifactId>reforms-api</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>com.reforms21</groupId>
+			<artifactId>reforms-lib-webutil</artifactId>
+		</dependency>
+		
+		<!-- Here you should place project extra dependencies -->
+	</dependencies>
+
+	<build>
+		<plugins>
+			<!-- This is where we set desired Re_Forms 21 plugin version -->
+			<plugin>
+				<groupId>com.reforms21</groupId>
+				<artifactId>reforms-maven-plugin</artifactId>
+				<version>${reforms.version}</version>
+				<extensions>true</extensions>
+			</plugin>
+		</plugins>
+	</build>
+
+	<!-- Servlet module should be the last one -->
+	<modules>
+		<module>video_4.0.1-app-forms</module>
+		<module>video_4.0.1-app-servlet</module>
+	</modules>
+</project>

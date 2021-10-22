@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project
+	xmlns="http://maven.apache.org/POM/4.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+>
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>com.video_4.0.1</groupId>
+		<artifactId>video_4.0.1-app</artifactId>
+		<version>1.0.0</version>
+	</parent>
+	<artifactId>video_4.0.1-app-forms</artifactId>
+	<packaging>bundle</packaging>
+	<name>Videotron V4.0.1 Forms</name>
+
+	<dependencies>
+		<dependency>
+			<groupId>com.reforms21</groupId>
+			<artifactId>reforms-javac8-plugin</artifactId>
+			<scope>compile</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<resources>
+			<!-- This is to provide RFXML files together with Java classes -->
+			<resource>
+				<directory>src/main/resources</directory>
+			</resource>
+			<resource>
+				<directory>src/main/java</directory>
+				<excludes>
+					<exclude>**/*.java</exclude>
+				</excludes>
+			</resource>
+		</resources>
+	</build>
+</project>

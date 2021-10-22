@@ -1,0 +1,7 @@
+table:countries
+table:departments
+table:employees
+table:job_history
+table:jobs
+table:locations
+table:regions

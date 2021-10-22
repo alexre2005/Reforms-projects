@@ -1,0 +1,7 @@
+/* Re_Forms21 logo in the background */
+.rf-window-manager { 
+	background-image: url(../images/reforms21_logo.png);
+	background-repeat: no-repeat;
+	background-position: left bottom;
+	background-attachment: fixed;
+}

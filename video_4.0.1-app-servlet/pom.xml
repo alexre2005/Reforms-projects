@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project
+	xmlns="http://maven.apache.org/POM/4.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+>
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>com.video_4.0.1</groupId>
+		<artifactId>video_4.0.1-app</artifactId>
+		<version>1.0.0</version>
+		<relativePath>..</relativePath>
+	</parent>
+	<artifactId>video_4.0.1-app-servlet</artifactId>
+	<packaging>war</packaging>
+	<name>Videotron V4.0.1 Web Application</name>
+
+	<dependencies>
+		<!-- Mandatory Re_Forms 21 dependency -->
+		<dependency>
+			<groupId>com.reforms21</groupId>
+			<artifactId>reforms-servlet</artifactId>
+		</dependency>
+	</dependencies>
+
+	<profiles>
+		<profile>
+			<id>default</id>
+			<activation>
+				<activeByDefault>true</activeByDefault>
+			</activation>
+			<properties>
+				<!-- By default application is built as a single WAR file containing all dependencies -->
+				<reforms.buildMode>single-war</reforms.buildMode>
+			</properties>
+			<dependencies>
+				<!-- Here we list all form modules that are to be started in default mode -->
+				<dependency>
+					<groupId>${project.groupId}</groupId>
+					<artifactId>video_4.0.1-app-forms</artifactId>
+					<version>1.0.0</version>
+				</dependency>
+			</dependencies>
+		</profile>
+		<profile>
+			<id>osgi</id>
+			<properties>
+				<!-- In OSGi mode, form modules as well as reforms-framework and reforms-themes are provided in form of independend OSGi bundles -->
+				<reforms.buildMode>osgi</reforms.buildMode>
+			</properties>
+		</profile>
+		<profile>
+			<id>wildfly</id>
+			<properties>
+				<!-- Prepared WAR archive needs to be adjusted to target platform -->
+				<reforms.targetPlatform>wildfly</reforms.targetPlatform>
+			</properties>
+		</profile>
+		<profile>
+			<id>weblogic</id>
+			<properties>
+				<!-- Prepared WAR archive needs to be adjusted to target platform -->
+				<reforms.targetPlatform>weblogic</reforms.targetPlatform>
+			</properties>
+		</profile>
+		<profile>
+			<id>excludeConfig</id>
+			<properties>
+				<!-- Setting this to true will cause all [WEB-INF/classes/*.properties] files to be excluded from WAR -->
+				<reforms.excludeProperties>true</reforms.excludeProperties>
+			</properties>
+		</profile>
+	</profiles>
+
+	<build>
+		<resources>
+			<!-- We need to filter resources to make use of Maven properties in runtime through application.properties -->
+			<resource>
+				<directory>src/main/resources</directory>
+				<filtering>true</filtering>
+			</resource>
+		</resources>
+	</build>
+</project>

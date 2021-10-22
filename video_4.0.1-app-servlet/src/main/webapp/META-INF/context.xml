@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Context>
+	<!-- Disable session persistence -->
+	<Manager className="org.apache.catalina.session.StandardManager" pathname="" />
+	
+	<!-- Disable static resource caching to allow RFXML hot swapping -->
+	<Resources cachingAllowed="false" />
+</Context>

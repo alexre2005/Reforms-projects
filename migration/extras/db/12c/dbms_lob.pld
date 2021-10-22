@@ -1,0 +1,822 @@
+PACKAGE dbms_lob IS
+  ------------
+  --  OVERVIEW
+  --
+  --     This package provides general purpose routines for operations
+  --     on Oracle Large OBject (LOBs) datatypes - BLOB, CLOB (read-write)
+  --     and BFILEs (read-only).
+  --
+  --     Oracle 8.0 SQL supports the definition, creation, deletion, and
+  --     complete updates of LOBs. The main bulk of the LOB operations
+  --     are provided by this package.
+  --
+
+  ------------------------
+  -- RULES AND LIMITATIONS
+  --
+  --     The following rules apply in the specification of functions and
+  --     procedures in this package.
+  --
+  --     LENGTH and OFFSET parameters for routines operating on BLOBs and
+  --     BFILEs are to be specified in terms of bytes.
+  --     LENGTH and OFFSET parameters for routines operating on CLOBs
+  --     are to be specified in terms of characters.
+  --
+  --     A function/procedure will raise an INVALID_ARGVAL exception if the
+  --     the following restrictions are not followed in specifying values
+  --     for parameters (unless otherwise specified):
+  --
+  --     1. Only positive, absolute OFFSETs from the beginning of LOB data
+  --        are allowed. Negative offsets from the tail of the LOB are not
+  --        allowed.
+  --     2. Only positive, non-zero values are allowed for the parameters
+  --        that represent size and positional quantities such as AMOUNT,
+  --        OFFSET, NEWLEN, NTH etc.
+  --     3. The value of OFFSET, AMOUNT, NEWLEN, NTH must not exceed the
+  --        value lobmaxsize (which is (4GB-1) in Oracle 8.0) in any DBMS_LOB
+  --        procedure or function.
+  --     4. For CLOBs consisting of fixed-width multi-byte characters, the
+  --        maximum value for these parameters must not exceed
+  --              (lobmaxsize/character_width_in_bytes) characters
+  --        For example, if the CLOB consists of 2-byte characters such as
+  --        JA16SJISFIXED, then the maximum amount value should not exceed
+  --              4294967295/2 = 2147483647 characters
+  --
+  --     PL/SQL language specifications stipulate an upper limit of 32767
+  --     bytes (not characters) for RAW and VARCHAR2 parameters used in
+  --     DBMS_LOB routines.
+  --
+  --     If the value of AMOUNT+OFFSET exceeds 4GB (i.e. lobmaxsize+1) for
+  --     BLOBs and BFILEs, and (lobmaxsize/character_width_in_bytes)+1 for
+  --     CLOBs in calls to update routines - i.e. APPEND, COPY, TRIM, and
+  --     WRITE routines, access exceptions will be raised. Under these input
+  --     conditions, read routines such as READ, COMPARE, INSTR, SUBSTR, will
+  --     read till End of Lob/File is reached.
+  --     For example, for a READ operation on a BLOB or BFILE, if the user
+  --     specifies offset value of 3GB, and an amount value of 2 GB, READ
+  --     will read only ((4GB-1) - 3GB) bytes.
+  --
+  --     Functions with NULL or invalid input values for parameters will
+  --     return a NULL. Procedures with NULL values for destination LOB
+  --     parameters will raise exceptions.
+  --
+  --     Operations involving patterns as parameters, such as COMPARE, INSTR,
+  --     and SUBSTR do not support regular expressions or special matching
+  --     characters (such as % in the LIKE operator in SQL) in the PATTERN
+  --     parameter or substrings.
+  --
+  --     The End Of LOB condition is indicated by the READ procedure using
+  --     a NO_DATA_FOUND exception. This exception is raised only upon an
+  --     attempt by the user to read beyond the end of the LOB/FILE. The
+  --     READ buffer for the last read will contain 0 bytes.
+  --
+  --     For consistent LOB updates, the user is responsible for locking
+  --     the row containing the destination LOB before making a call to
+  --     any of the procedures (mutators) that modify LOB data.
+  --
+  --     For BFILEs, the routines COMPARE, INSTR, READ, SUBSTR, will raise
+  --     exceptions if the file is not already opened using FILEOPEN.
+  --
+
+  -----------
+  -- SECURITY
+  --
+  --     Privileges are associated with the the caller of the procedures/
+  --     functions in this package as follows:
+  --     If the caller is an anonymous PL/SQL block, the procedures/functions
+  --     are run with the privilege of the current user.
+  --     If the caller is a stored procedure, the procedures/functions are run
+  --     using the privileges of the owner of the stored procedure.
+  --
+
+  ------------
+  -- CONSTANTS
+  --
+  file_readonly CONSTANT BINARY_INTEGER := 0;
+  lob_readonly  CONSTANT BINARY_INTEGER := 0;
+  lob_readwrite CONSTANT BINARY_INTEGER := 1;
+  lobmaxsize    CONSTANT INTEGER        := 18446744073709551615;
+  call          CONSTANT PLS_INTEGER    := 12;
+  transaction   CONSTANT PLS_INTEGER    := 11;
+  session       CONSTANT PLS_INTEGER    := 10;
+  warn_inconvertible_char    CONSTANT INTEGER    := 1;
+  default_csid  CONSTANT INTEGER        := 0;
+  default_lang_ctx   CONSTANT INTEGER   := 0;
+  no_warning         CONSTANT INTEGER   := 0;
+
+    -- Option Types
+  opt_compress    CONSTANT PLS_INTEGER    := 1;
+  opt_encrypt     CONSTANT PLS_INTEGER    := 2;
+  opt_deduplicate CONSTANT PLS_INTEGER    := 4;
+  -- 16 is reserved for ContentType (also referred to as MimeType)
+  --
+
+  -- Option Values
+  compress_off    CONSTANT PLS_INTEGER    := 0;
+  compress_on     CONSTANT PLS_INTEGER    := opt_compress;
+  encrypt_off     CONSTANT PLS_INTEGER    := 0;
+  encrypt_on      CONSTANT PLS_INTEGER    := opt_encrypt;
+  deduplicate_off CONSTANT PLS_INTEGER    := 0;
+  deduplicate_on  CONSTANT PLS_INTEGER    := opt_deduplicate;
+
+  -- DBFS Link State Values
+  dbfs_link_never	CONSTANT PLS_INTEGER    := 0;
+  dbfs_link_yes         CONSTANT PLS_INTEGER    := 1;
+  dbfs_link_no          CONSTANT PLS_INTEGER    := 2;
+
+  -- DBFS Link flags
+  -- These need to align with flags in SecureFile header
+  dbfs_link_nocache   CONSTANT PLS_INTEGER    := 0;
+  dbfs_link_cache     CONSTANT PLS_INTEGER    := 1;
+
+  -- maximum length of DBFS Link pathname
+  dbfs_link_path_max_size  CONSTANT PLS_INTEGER  := 1024;
+
+  -- maximum length of contenttype string
+  -- The assumption is that the ContentType is in ASCII
+  -- (i.e. 1-byte/7-bit UTF8).
+  contenttype_max_size   CONSTANT PLS_INTEGER  := 128;
+
+-------------
+
+
+  -------------
+  -- STRUCTURES
+  --
+  TYPE blob_deduplicate_region IS RECORD (
+    lob_offset          INTEGER,
+    len                 INTEGER,
+    primary_lob         BLOB,
+    primary_lob_offset  NUMBER,
+    mime_type           VARCHAR2(80));
+
+  TYPE blob_deduplicate_region_tab IS TABLE OF blob_deduplicate_region
+       INDEX BY PLS_INTEGER;
+
+  TYPE clob_deduplicate_region IS RECORD (
+    lob_offset          INTEGER,
+    len                 INTEGER,
+    primary_lob         CLOB,
+    primary_lob_offset  NUMBER,
+    mime_type           VARCHAR2(80));
+
+  TYPE clob_deduplicate_region_tab IS TABLE OF clob_deduplicate_region
+       INDEX BY PLS_INTEGER;
+
+  -------------
+  -- EXCEPTIONS
+  --
+  invalid_argval EXCEPTION;
+    PRAGMA EXCEPTION_INIT(invalid_argval, -21560);
+    invalid_argval_num CONSTANT NUMBER := 21560;
+  -- *Mesg: "argument %s is null, invalid, or out of range"
+  -- *Cause: The argument is expecting a non-null, valid value but the
+  --         argument value passed in is null, invalid, or out of range.
+  --         Examples include when the LOB/FILE positional or size
+  --         argument has a value outside the range 1 through (4GB - 1),
+  --         or when an invalid open mode is used to open a file, etc.
+  -- *Action: Check your program and correct the caller of the routine
+  --          to not pass a null, invalid or out-of-range argument value.
+
+  access_error EXCEPTION;
+    PRAGMA EXCEPTION_INIT(access_error, -22925);
+    eccess_error_num CONSTANT NUMBER := 22925;
+  -- *Mesg: "operation would exceed maximum size allowed for a lob"
+  -- *Cause: Trying to write too much data to the lob.  Lob size is limited
+  --         to 4 gigabytes.
+  -- *Action: Either start writing at a smaller lob offset or write less data
+  --          to the lob.
+
+  noexist_directory EXCEPTION;
+    PRAGMA EXCEPTION_INIT(noexist_directory, -22285);
+    noexist_directory_num CONSTANT NUMBER := 22285;
+  -- *Mesg: "%s failed - directory does not exist"
+  -- *Cause: The directory leading to the file does not exist.
+  -- *Action: Ensure that a system object corresponding to the specified
+  --          directory exists in the database dictionary.
+
+  nopriv_directory EXCEPTION;
+    PRAGMA EXCEPTION_INIT(nopriv_directory, -22286);
+    nopriv_directory_num CONSTANT NUMBER := 22286;
+  -- *Mesg: "%s failed - insufficient privileges on directory"
+  -- *Cause: The user does not have the necessary access privileges on the
+  --         directory alias and/or the file for the operation.
+  -- *Action: Ask the database/system administrator to grant the required
+  --          privileges on the directory alias and/or the file.
+
+  invalid_directory EXCEPTION;
+    PRAGMA EXCEPTION_INIT(invalid_directory, -22287);
+    invalid_directory_num CONSTANT NUMBER := 22287;
+  -- *Mesg: "%s failed - invalid or modified directory"
+  -- *Cause: The directory alias used for the current operation is not valid
+  --         if being accessed for the first time, or has been modified by
+  --         the DBA since the last access.
+  -- *Action: If you are accessing this directory for the first time, provide
+  --          a valid directory name. If you have been already successful in
+  --          opening a file under this directory before this error occured,
+  --          then first close the file, then retry the operation with a valid
+  --          directory alias as modified by your DBA. Oracle strongly
+  --          recommends that any changes to directories and/or their
+  --          privileges should be done only during quiescent periods of
+  --          database operation.
+
+  operation_failed EXCEPTION;
+    PRAGMA EXCEPTION_INIT(operation_failed, -22288);
+    operation_failed_num CONSTANT NUMBER := 22288;
+  -- *Mesg: "file operation %s failed\n%s"
+  -- *Cause: The operation attempted on the file failed.
+  -- *Action: See the next error message for more detailed information.  Also,
+  --          verify that the file exists and that the necessary privileges
+  --          are set for the specified operation.  If the error
+  --          still persists, report the error to the DBA.
+
+  unopened_file EXCEPTION;
+    PRAGMA EXCEPTION_INIT(unopened_file, -22289);
+    unopened_file_num CONSTANT NUMBER := 22289;
+  -- *Mesg: "cannot perform %s operation on an unopened file"
+  -- *Cause: The file is not open for the required operation to be performed.
+  -- *Action: Check that the current operation is preceded by a successful
+  --          file open operation.
+
+  open_toomany EXCEPTION;
+    PRAGMA EXCEPTION_INIT(open_toomany, -22290);
+    open_toomany_num CONSTANT NUMBER := 22290;
+  -- *Mesg: "%s failed - max limit reached on number of open files"
+  -- *Cause: The number of open files has reached the maximum limit.
+  -- *Action: Close some of your open files, and retry the operation for your
+  --          current session. To increase the database wide limit on number
+  --          of open files allowed per session, contact your DBA.
+
+  securefile_badlob EXCEPTION;
+    PRAGMA EXCEPTION_INIT(securefile_badlob, -43856);
+    securefile_badlob_num CONSTANT NUMBER := 43856;
+  -- *Mesg: "%s failed - A non-SecureFile LOB type was used in a SecureFile only call"
+  -- *Cause: The locator passed was for a BFILE, TEMP, ABSTRACT or BasicFile LOB
+  --         when we expected a SecureFile LOB.
+  -- *Action: Be sure a SecureFile is being used before calling this
+  --          function or procedure.  You can use issecurefile for this.
+
+  securefile_badparam EXCEPTION;
+    PRAGMA EXCEPTION_INIT(securefile_badparam, -43857);
+    securefile_badparam_num CONSTANT NUMBER := 43857;
+  -- *Mesg: "%s failed - An invalid argument was passed to a SecureFile function or procedure"
+  -- *Cause: One of the parameters passed was invalid
+  -- *Action: Check all the parameters to be sure they are valid.
+
+  securefile_markerased EXCEPTION;
+    PRAGMA EXCEPTION_INIT(securefile_markerased, -43861);
+    securefile_markerased_num CONSTANT NUMBER := 43861;
+  -- *Mesg: "%s failed - The mark provided to a Fragment function has been deleted."
+  -- *Cause: The given mark had been erased before the call.
+  -- *Action: Perform a mark reset and check the application for consistency.
+
+  securefile_outofbounds EXCEPTION;
+    PRAGMA EXCEPTION_INIT(securefile_outofbounds, -43883);
+    securefile_outofbounds_num CONSTANT NUMBER := 43883;
+  -- *Mesg: "%s failed - Attempted to perform a Fragment operation past LOB end"
+  -- *Cause: The given offset was past the end of the LOB.
+  -- *Action: Make sure the offsets given are valid at the time of the call.
+
+  contenttype_toolong EXCEPTION;
+    PRAGMA EXCEPTION_INIT(contenttype_toolong, -43859);
+    contenttype_toolong_num CONSTANT NUMBER := 43859;
+  -- *Mesg: "CONTENTTYPE string too long"
+  -- *Cause: Length of CONTENTTYPE string exceeds defined maximum
+  -- *Action: Modify length of CONTENTTYPE string and retry operation
+
+  contenttypebuf_wrong EXCEPTION;
+    PRAGMA EXCEPTION_INIT(contenttypebuf_wrong, -43862);
+    contenttypebuf_wrong_num CONSTANT NUMBER := 43862;
+  -- *Mesg: "CONTENTTYPE buffer length incorrect"
+  -- *Cause: Length of CONTENTTYPE buffer less than defined constant.
+  -- *Action: Modify length of CONTENTTYPE buffer and retry operation
+
+  ---------------------------
+  -- PROCEDURES AND FUNCTIONS
+  --
+  PROCEDURE append(dest_lob IN OUT NOCOPY BLOB,
+                   src_lob  IN            BLOB);
+
+  PROCEDURE append(dest_lob IN OUT NOCOPY CLOB,
+                   src_lob  IN            CLOB);
+
+  FUNCTION compare(lob_1    IN BLOB,
+                   lob_2    IN BLOB)
+    RETURN INTEGER DETERMINISTIC;
+                   
+  FUNCTION compare(lob_1    IN BLOB,
+                   lob_2    IN BLOB,
+                   amount   IN INTEGER := 18446744073709551615,
+                   offset_1 IN INTEGER := 1,
+                   offset_2 IN INTEGER := 1)
+    RETURN INTEGER DETERMINISTIC;
+    
+
+  PROCEDURE close(lob_loc IN OUT NOCOPY BLOB);
+
+  PROCEDURE close(lob_loc IN OUT NOCOPY CLOB);
+--  RF-2428
+--  PROCEDURE close(file_loc IN OUT NOCOPY BFILE);
+
+  FUNCTION compare(lob_1    IN CLOB,
+                   lob_2    IN CLOB)
+    RETURN INTEGER DETERMINISTIC;
+  
+  FUNCTION compare(lob_1    IN CLOB,
+                   lob_2    IN CLOB,
+                   amount   IN INTEGER := 18446744073709551615,
+                   offset_1 IN INTEGER := 1,
+                   offset_2 IN INTEGER := 1)
+    RETURN INTEGER DETERMINISTIC;
+--  RF-2428    
+/*
+  FUNCTION compare(file_1   IN BFILE,
+                   file_2   IN BFILE,
+                   amount   IN INTEGER,
+                   offset_1 IN INTEGER := 1,
+                   offset_2 IN INTEGER := 1)
+    RETURN INTEGER DETERMINISTIC;
+*/    
+
+  PROCEDURE copy(dest_lob    IN OUT NOCOPY BLOB,
+                 src_lob     IN            BLOB,
+                 amount      IN            INTEGER,
+                 dest_offset IN            INTEGER := 1,
+                 src_offset  IN            INTEGER := 1);
+
+  PROCEDURE copy(dest_lob    IN OUT NOCOPY  CLOB,
+                 src_lob     IN            CLOB,
+                 amount      IN            INTEGER,
+                 dest_offset IN            INTEGER := 1,
+                 src_offset  IN            INTEGER := 1);
+
+  PROCEDURE createtemporary(lob_loc IN OUT NOCOPY  BLOB,
+                            cache   IN            BOOLEAN,
+                            dur     IN            PLS_INTEGER := 10);
+
+  PROCEDURE createtemporary(lob_loc IN OUT NOCOPY  CLOB,
+                            cache   IN            BOOLEAN,
+                            dur     IN            PLS_INTEGER := 10);
+
+  PROCEDURE erase(lob_loc IN OUT NOCOPY  BLOB,
+                  amount  IN OUT NOCOPY  INTEGER,
+                  offset  IN      INTEGER := 1);
+
+  PROCEDURE erase(lob_loc IN OUT NOCOPY  CLOB,
+                  amount  IN OUT NOCOPY  INTEGER,
+                  offset  IN            INTEGER := 1);
+--  RF-2428
+--  PROCEDURE fileclose(file_loc IN OUT NOCOPY  BFILE);
+
+  PROCEDURE filecloseall;
+--  RF-2428
+/*
+  FUNCTION fileexists(file_loc IN BFILE)
+    RETURN INTEGER;
+*/    
+--  RF-2428
+/*
+  PROCEDURE filegetname(file_loc  IN  BFILE,
+                        dir_alias OUT VARCHAR2,
+                        filename  OUT VARCHAR2);
+*/
+/*
+  FUNCTION fileisopen(file_loc IN BFILE)
+    RETURN INTEGER;
+    
+
+  PROCEDURE fileopen(file_loc  IN OUT NOCOPY  BFILE,
+                     open_mode IN      BINARY_INTEGER := file_readonly);
+*/
+
+  PROCEDURE freetemporary(lob_loc IN OUT NOCOPY  BLOB);
+
+  PROCEDURE freetemporary(lob_loc IN OUT NOCOPY  CLOB);
+
+  FUNCTION getchunksize(lob_loc IN BLOB)
+    RETURN INTEGER DETERMINISTIC;
+    
+
+  FUNCTION getchunksize(lob_loc IN CLOB)
+    RETURN INTEGER DETERMINISTIC;
+    
+
+  FUNCTION getlength(lob_loc IN BLOB)
+    RETURN INTEGER DETERMINISTIC;
+    
+
+  FUNCTION getlength(lob_loc IN CLOB)
+    RETURN INTEGER DETERMINISTIC;
+--  RF-2428    
+/*
+  FUNCTION getlength(file_loc IN BFILE)
+    RETURN INTEGER DETERMINISTIC;
+*/    
+
+  FUNCTION get_storage_limit(lob_loc IN CLOB)
+    RETURN INTEGER DETERMINISTIC;
+    
+
+  FUNCTION get_storage_limit(lob_loc IN BLOB)
+    RETURN INTEGER DETERMINISTIC;
+    
+
+  FUNCTION  istemporary(lob_loc IN BLOB)
+    RETURN INTEGER DETERMINISTIC;
+    
+
+  FUNCTION istemporary(lob_loc IN CLOB)
+    RETURN INTEGER DETERMINISTIC;
+    
+/*
+  function isopen(lob_loc in blob)
+    RETURN INTEGER;
+    
+
+  function isopen(lob_loc in clob character set any_cs)
+    RETURN INTEGER;
+    
+
+  function isopen(file_loc in bfile)
+    RETURN INTEGER;
+*/
+--  RF-2428
+/*
+  PROCEDURE loadfromfile(dest_lob    IN OUT NOCOPY  BLOB,
+                         src_lob     IN            BFILE,
+                         amount      IN            INTEGER,
+                         dest_offset IN            INTEGER := 1,
+                         src_offset  IN            INTEGER := 1);
+
+  PROCEDURE loadfromfile(dest_lob    IN OUT NOCOPY  CLOB,
+                         src_lob     IN            BFILE,
+                         amount      IN            INTEGER,
+                         dest_offset IN            INTEGER := 1,
+                         src_offset  IN            INTEGER := 1);
+
+  PROCEDURE loadblobfromfile(dest_lob    IN OUT NOCOPY  BLOB,
+                             src_bfile   IN             BFILE,
+                             amount      IN             INTEGER,
+                             dest_offset IN OUT         INTEGER,
+                             src_offset  IN OUT         INTEGER);
+
+  PROCEDURE loadclobfromfile(dest_lob IN OUT NOCOPY  CLOB,
+                             src_bfile      IN             BFILE,
+                             amount         IN             INTEGER,
+                             dest_offset    IN OUT         INTEGER,
+                             src_offset     IN OUT         INTEGER,
+                             bfile_csid     IN             NUMBER,
+                             lang_context   IN OUT         INTEGER,
+                             warning        OUT            INTEGER);
+*/
+  PROCEDURE convertToClob(dest_lob IN OUT NOCOPY  CLOB,
+                          src_blob       IN             BLOB,
+                          amount         IN             INTEGER,
+                          dest_offset    IN OUT         INTEGER,
+                          src_offset     IN OUT         INTEGER,
+                          blob_csid      IN             NUMBER,
+                          lang_context   IN OUT         INTEGER,
+                          warning        OUT            INTEGER);
+
+  PROCEDURE convertToBlob(dest_lob IN OUT NOCOPY  BLOB,
+                          src_clob       IN        CLOB,
+                          amount         IN             INTEGER,
+                          dest_offset    IN OUT         INTEGER,
+                          src_offset     IN OUT         INTEGER,
+                          blob_csid      IN             NUMBER,
+                          lang_context   IN OUT         INTEGER,
+                          warning        OUT            INTEGER);
+
+  PROCEDURE open(lob_loc   IN OUT NOCOPY BLOB,
+                 open_mode IN     BINARY_INTEGER);
+
+  PROCEDURE open(lob_loc   IN OUT NOCOPY CLOB,
+                 open_mode IN     BINARY_INTEGER);
+--  RF-2428
+/*
+  PROCEDURE open(file_loc  IN OUT NOCOPY BFILE,
+                 open_mode IN     BINARY_INTEGER := file_readonly);
+*/
+  FUNCTION instr(lob_loc IN BLOB,
+                 pattern IN RAW,
+                 offset  IN INTEGER := 1,
+                 nth     IN INTEGER := 1)
+    RETURN INTEGER DETERMINISTIC;
+    
+
+  FUNCTION instr(lob_loc IN CLOB    ,
+                 pattern IN VARCHAR2,
+                 offset  IN INTEGER := 1,
+                 nth     IN INTEGER := 1)
+    RETURN INTEGER DETERMINISTIC;
+--  RF-2428    
+/*
+  FUNCTION instr(file_loc IN BFILE,
+                 pattern  IN RAW,
+                 offset   IN INTEGER := 1,
+                 nth      IN INTEGER := 1)
+    RETURN INTEGER DETERMINISTIC;
+*/    
+
+  PROCEDURE read(lob_loc IN            BLOB,
+                 amount  IN OUT NOCOPY INTEGER,
+                 offset  IN            INTEGER,
+                 buffer  OUT           RAW);
+
+  PROCEDURE read(lob_loc IN            CLOB    ,
+                 amount  IN OUT NOCOPY INTEGER,
+                 offset  IN            INTEGER,
+                 buffer  OUT           VARCHAR2);
+--  RF-2428
+/*
+  PROCEDURE read(file_loc IN             BFILE,
+                 amount   IN OUT NOCOPY  INTEGER,
+                 offset   IN             INTEGER,
+                 buffer   OUT            RAW);
+*/
+  FUNCTION substr(lob_loc IN BLOB,
+                  amount  IN INTEGER := 32767,
+                  offset  IN INTEGER := 1)
+    RETURN RAW DETERMINISTIC;
+    
+
+  FUNCTION substr(lob_loc IN CLOB,
+                  amount  IN INTEGER := 32767,
+                  offset  IN INTEGER := 1)
+    RETURN VARCHAR2;
+--  RF-2428    
+/*
+  FUNCTION substr(file_loc IN BFILE,
+                  amount   IN INTEGER := 32767,
+                  offset   IN INTEGER := 1)
+    RETURN RAW DETERMINISTIC;
+*/    
+
+  PROCEDURE trim(lob_loc IN OUT NOCOPY  BLOB,
+                 newlen  IN            INTEGER);
+
+  PROCEDURE trim(lob_loc IN OUT NOCOPY  CLOB,
+                 newlen  IN            INTEGER);
+
+  PROCEDURE write(lob_loc IN OUT NOCOPY  BLOB,
+                  amount  IN            INTEGER,
+                  offset  IN            INTEGER,
+                  buffer  IN            RAW);
+
+  PROCEDURE write(lob_loc IN OUT NOCOPY  CLOB    ,
+                  amount  IN           INTEGER,
+                  offset  IN           INTEGER,
+                  buffer  IN           VARCHAR2);
+
+  PROCEDURE writeappend(lob_loc IN OUT NOCOPY  BLOB,
+                        amount  IN     INTEGER,
+                        buffer  IN     RAW);
+
+  PROCEDURE writeappend(lob_loc IN OUT NOCOPY CLOB    ,
+                        amount  IN            INTEGER,
+                        buffer  IN     VARCHAR2);
+
+-- fragment update API
+
+  PROCEDURE fragment_insert(
+    lob_loc     IN OUT NOCOPY BLOB,
+    amount      IN            INTEGER,
+    offset      IN            INTEGER,
+    buffer      IN            RAW
+  );
+
+  PROCEDURE fragment_insert(
+    lob_loc     IN OUT NOCOPY CLOB,
+    amount      IN            INTEGER,
+    offset      IN            INTEGER,
+    buffer      IN            VARCHAR2
+  );
+
+  PROCEDURE fragment_delete(
+    lob_loc     IN OUT NOCOPY BLOB,
+    amount      IN            INTEGER,
+    offset      IN            INTEGER
+  );
+
+  PROCEDURE fragment_delete(
+    lob_loc     IN OUT NOCOPY CLOB,
+    amount      IN            INTEGER,
+    offset      IN            INTEGER
+  );
+
+  PROCEDURE fragment_move(
+    lob_loc             IN OUT NOCOPY BLOB,
+    amount              IN            INTEGER,
+    src_offset          IN            INTEGER,
+    dest_offset         IN            INTEGER
+  );
+
+  PROCEDURE fragment_move(
+    lob_loc             IN OUT NOCOPY CLOB,
+    amount              IN            INTEGER,
+    src_offset          IN            INTEGER,
+    dest_offset         IN            INTEGER
+  );
+
+  PROCEDURE fragment_replace(
+    lob_loc             IN OUT NOCOPY BLOB,
+    old_amount          IN            INTEGER,
+    new_amount          IN            INTEGER,
+    offset              IN            INTEGER,
+    buffer              IN            RAW
+  );
+
+  PROCEDURE fragment_replace(
+    lob_loc             IN OUT NOCOPY CLOB     ,
+    old_amount          IN            INTEGER,
+    new_amount          IN            INTEGER,
+    offset              IN            INTEGER,
+    buffer              IN            VARCHAR2
+  );
+
+  FUNCTION getoptions(
+    lob_loc             IN     BLOB,
+    option_types        IN     PLS_INTEGER
+  ) RETURN PLS_INTEGER;
+    
+
+  FUNCTION getoptions(
+    lob_loc             IN     CLOB,
+    option_types        IN     PLS_INTEGER
+  ) RETURN PLS_INTEGER;
+    
+
+  PROCEDURE setoptions(
+    lob_loc             IN OUT NOCOPY BLOB,
+    option_types        IN            PLS_INTEGER,
+    options             IN            PLS_INTEGER
+  );
+
+  PROCEDURE setoptions(
+    lob_loc             IN OUT NOCOPY CLOB,
+    option_types        IN            PLS_INTEGER,
+    options             IN            PLS_INTEGER
+  );
+
+  PROCEDURE get_deduplicate_regions(
+    lob_loc      IN            BLOB,
+    region_table IN OUT NOCOPY BLOB_DEDUPLICATE_REGION_TAB
+  );
+
+  PROCEDURE get_deduplicate_regions(
+    lob_loc      IN            CLOB,
+    region_table IN OUT NOCOPY CLOB_DEDUPLICATE_REGION_TAB
+  );
+
+  FUNCTION issecurefile(
+    lob_loc    IN      BLOB
+  ) RETURN BOOLEAN;
+    
+
+  FUNCTION issecurefile(
+    lob_loc    IN      CLOB
+  ) RETURN BOOLEAN;
+    
+
+-- DBFS Link Functionality
+  PROCEDURE copy_from_dbfs_link(
+    lob_loc       IN OUT BLOB
+  );
+
+  PROCEDURE copy_from_dbfs_link(
+    lob_loc       IN OUT CLOB
+  );
+
+  PROCEDURE move_to_dbfs_link(
+    lob_loc       IN OUT BLOB,
+    storage_path  IN     VARCHAR2,
+    flags         IN     BINARY_INTEGER := DBFS_LINK_NOCACHE
+  );
+
+  PROCEDURE move_to_dbfs_link(
+    lob_loc       IN OUT CLOB,
+    storage_path  IN     VARCHAR2,
+    flags         IN     BINARY_INTEGER := DBFS_LINK_NOCACHE
+  );
+
+  FUNCTION get_dbfs_link(
+    lob_loc      IN     BLOB
+  ) RETURN VARCHAR2;
+    
+
+  FUNCTION get_dbfs_link(
+    lob_loc      IN     CLOB
+  ) RETURN VARCHAR2;
+    
+
+  PROCEDURE set_dbfs_link(
+    lob_loc         IN OUT BLOB,
+    storage_path    IN     VARCHAR2
+  );
+
+  PROCEDURE set_dbfs_link(
+    lob_loc         IN OUT CLOB,
+    storage_path    IN     VARCHAR2
+  );
+
+  PROCEDURE copy_dbfs_link(
+    dest_lob        IN OUT BLOB,
+    src_lob         IN     BLOB,
+    options         IN     PLS_INTEGER
+  );
+
+  PROCEDURE copy_dbfs_link(
+    dest_lob        IN OUT CLOB,
+    src_lob         IN     CLOB,
+    options         IN     PLS_INTEGER
+  );
+
+  PROCEDURE get_dbfs_link_state(
+    lob_loc       IN     BLOB,
+    storage_path     OUT VARCHAR2,
+    state            OUT PLS_INTEGER,
+    cached           OUT BOOLEAN
+  );
+
+  PROCEDURE get_dbfs_link_state(
+    lob_loc       IN     CLOB,
+    storage_path     OUT VARCHAR2,
+    state            OUT PLS_INTEGER,
+    cached           OUT BOOLEAN
+  );
+
+--  PROCEDURE dbfs_link_purge_cache(
+--    lob_loc       IN OUT BLOB
+--  );
+--  PROCEDURE dbfs_link_purge_cache(
+--    lob_loc       IN OUT CLOB
+--  );
+
+  FUNCTION dbfs_link_generate_path(
+    lob_loc       IN     BLOB,
+    storage_dir   IN     VARCHAR2
+  ) RETURN VARCHAR2;
+
+
+  FUNCTION dbfs_link_generate_path(
+    lob_loc       IN     CLOB,
+    storage_dir   IN     VARCHAR2
+  ) RETURN VARCHAR2;
+    
+
+
+    FUNCTION getcontenttype(
+    lob_loc             IN     BLOB
+  ) RETURN VARCHAR2;
+    
+
+  FUNCTION getcontenttype(
+    lob_loc             IN     CLOB     
+  ) RETURN VARCHAR2;
+    
+
+  PROCEDURE setcontenttype(
+    lob_loc             IN OUT NOCOPY BLOB,
+    contenttype            IN VARCHAR2
+  );
+
+  PROCEDURE setcontenttype(
+    lob_loc             IN OUT NOCOPY CLOB     ,
+    contenttype            IN VARCHAR2
+  );
+
+/**
+ * Write from a clob to a file with given character encoding.
+ * If csid is zero or not given then the file will be in the db charset.
+ * Input Parameters:
+ *       cl         -> Input CLOB
+ *       flocation  -> Directory location for the output
+ *       fname      -> name of the output file
+ *       cswid      -> input csid
+ *       openmode   -> (optional) mode to open the output file in.
+ *                     wb -- write byte mode
+ *                     ab -- append byte mode
+ *                     default is wb
+ */
+
+  PROCEDURE clob2file( cl                  IN CLOB,
+                       flocation           IN VARCHAR2,
+                       fname               IN VARCHAR2,
+                       csid                IN NUMBER := 0,
+                       openmode            IN VARCHAR2 := 'wb');
+
+  /*
+   * ISREMOTE accepts a BLOB, CLOB or NCLOB
+   * It returns TRUE for remote LOBs obtained over a database link.
+   * Ir returns FALSE for  LOBs obbtained from local database.
+   * It throws an error for empty and uninitialized locators
+   */
+  FUNCTION isremote(lob_loc IN BLOB)
+    RETURN BOOLEAN;
+    
+
+  FUNCTION isremote(lob_loc IN CLOB)
+    RETURN BOOLEAN;
+    
+
+END dbms_lob;
